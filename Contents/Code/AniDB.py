@@ -10,7 +10,6 @@ import re        # Functions: re.search, re.match, re.sub, re.IGNORECASE
 import string    # Functions:
 import time      # Functions:
 import AnimeLists
-import json
 from common import GetXml, Dict, SaveDict, Log, DictString
 from lxml import etree
 ns = etree.FunctionNamespace(None)
@@ -20,8 +19,6 @@ ns['clean-title'] = lambda context, s: common.cleanse_title(s)
 ### Variables ###
 ### Always on variables ###
 AniDBTitlesDB = None
-with open('ignored_tags.json') as json_file:
-  ignored_tags = json.load(json_file)
 
 ### Functions ###
 
@@ -123,17 +120,22 @@ def GetMetadata(media, movie, error_log, source, AniDBid, TVDBid, AniDBMovieSets
 
   ### Build the list of anidbids for files present ####
   if source.startswith("tvdb") or source.startswith("anidb") and not movie and max(map(int, media.seasons.keys()))>1:  #multi anidbid required only for tvdb numbering
-    full_array  = [ anidbid for season in Dict(mappingList, 'TVDB') or [] for anidbid in Dict(mappingList, 'TVDB', season) if season and 'e' not in season and anidbid.isdigit() ]
-    AniDB_array = { AniDBid: [] } if Dict(mappingList, 'defaulttvdbseason')=='1' and source!='tvdb4' else {}
+    full_array = [anidbid for season in Dict(mappingList, 'TVDB') or [] for anidbid in Dict(mappingList, 'TVDB', season) if season and 'e' not in season and anidbid.isdigit() ]
+    AniDB_array = {AniDBid: []} if Dict(mappingList, 'defaulttvdbseason') == '1' and source != 'tvdb4' else {}
     for season in sorted(media.seasons, key=common.natural_sort_key) if not movie else []:  # For each season, media, then use metadata['season'][season]...
       for episode in sorted(media.seasons[season].episodes, key=common.natural_sort_key):
-        if int(episode)>99:  continue  # AniDB non-normal special (op/ed/t/o) that is not mapable
-        if   source=='tvdb3' and season!=0:  new_season, new_episode, anidbid = AnimeLists.anidb_ep(mappingList, season, Dict(mappingList, 'absolute_map', episode, default=(None, episode))[1])  # Pull absolute number then try to map
-        elif source=='tvdb4' and season!=0:  new_season, new_episode          = Dict(mappingList, 'absolute_map', episode, default=(season, episode)); anidbid = 'UNKN'                             # Not TVDB mapping. Use custom ASS mapping to pull season/episode
-        else:                                new_season, new_episode, anidbid = AnimeLists.anidb_ep(mappingList, season, episode)                                                                   # Try to map
+        if int(episode) > 99:
+          continue  # AniDB non-normal special (op/ed/t/o) that is not mapable
+        if source == 'tvdb3' and season != 0:
+          new_season, new_episode, anidbid = AnimeLists.anidb_ep(mappingList, season, Dict(mappingList, 'absolute_map', episode, default=(None, episode))[1])  # Pull absolute number then try to map
+        elif source == 'tvdb4' and season != 0:
+          new_season, new_episode = Dict(mappingList, 'absolute_map', episode, default=(season, episode)); anidbid = 'UNKN'                             # Not TVDB mapping. Use custom ASS mapping to pull season/episode
+        else:
+          new_season, new_episode, anidbid = AnimeLists.anidb_ep(mappingList, season, episode)                                                                   # Try to map
         numbering = 's{}e{}'.format(season, episode) + ('(s{}e{})'.format(new_season, new_episode) if season!=new_season and episode!=new_episode else '')
         if anidbid and not (new_season=='0' and new_episode=='0'):  SaveDict([numbering], AniDB_array, anidbid)
-      else:  continue
+      else:
+        continue
   elif source.startswith('anidb') and AniDBid != "":  full_array, AniDB_array = [AniDBid], {AniDBid:[]}
   else:                                               full_array, AniDB_array = [], {}
 
@@ -323,38 +325,42 @@ def GetMetadata(media, movie, error_log, source, AniDBid, TVDBid, AniDBMovieSets
               SaveDict((os.path.join('AniDB', 'poster', GetXml(xml, 'picture')), rank, None), AniDB_dict, 'seasons', season, 'posters', ANIDB_PIC_BASE_URL + GetXml(xml, 'picture'))
 
           ### In AniDB numbering, Movie episode group, create key and create key in dict with empty list if doesn't exist ###
-          else:  #if source.startswith("anidb") and not movie and max(map(int, media.seasons.keys()))<=1:
+          else:  # if source.startswith("anidb") and not movie and max(map(int, media.seasons.keys()))<=1:
 
             ### Movie episode group, create key and create key in dict with empty list if doesn't exist ###
             key = ''
             if epNumType=='1' and GetXml(xml, '/anime/episodecount')=='1' and GetXml(xml, '/anime/type') in ('Movie', 'OVA'):
-              key = '1' if title in ('Complete Movie', 'OVA') else title[-1] if title.startswith('Part ') and title[-1].isdigit() else '' #'-1'
+              key = '1' if title in ('Complete Movie', 'OVA') else title[-1] if title.startswith('Part ') and title[-1].isdigit() else ''  # '-1'
               if key:  SaveDict([], movie_ep_groups, key)
 
-            #Episode missing from disk
-            if not season in media.seasons or not episode in media.seasons[season].episodes:
+            # Episode missing from disk
+            if season not in media.seasons or episode not in media.seasons[season].episodes:
               Log.Info('[ ] {} => s{:>1}e{:>3} air_date: {}'.format(numbering, season, episode, GetXml(ep_obj, 'airdate')))
               current_air_date = GetXml(ep_obj, 'airdate').replace('-','')
               current_air_date = int(current_air_date) if current_air_date.isdigit() and int(current_air_date) > 10000000 else 99999999
               if int(time.strftime("%Y%m%d")) > current_air_date+1:
-                if   epNumType == '1' and key:  SaveDict([numbering], movie_ep_groups, key   )
-                elif epNumType in ['1', '2']:   SaveDict([episode],   missing,         season)
+                if epNumType == '1' and key:
+                  SaveDict([numbering], movie_ep_groups, key)
+                elif epNumType in ['1', '2']:
+                  SaveDict([episode], missing, season)
               continue
 
           ### Episodes
           SaveDict(language_rank, AniDB_dict, 'seasons', season, 'episodes', episode, 'language_rank')
-          SaveDict(title,         AniDB_dict, 'seasons', season, 'episodes', episode, 'title'        )
+          SaveDict(title,         AniDB_dict, 'seasons', season, 'episodes', episode, 'title')
           Log.Info('[X] {} => s{:>1}e{:>3} air_date: {} language_rank: {}, title: "{}"'.format(numbering, season, episode, GetXml(ep_obj, 'airdate'), language_rank, title))
 
           if GetXml(ep_obj, 'length').isdigit():
             SaveDict(int(GetXml(ep_obj, 'length'))*1000*60, AniDB_dict, 'seasons', season, 'episodes', episode, 'duration')  # AniDB stores it in minutes, Plex save duration in millisecs
-            if season == "1":  numEpisodes, totalDuration = numEpisodes+1, totalDuration + int(GetXml(ep_obj, 'length'))
+            if season == "1":
+              numEpisodes, totalDuration = numEpisodes+1, totalDuration + int(GetXml(ep_obj, 'length'))
 
-          SaveDict(GetXml(ep_obj, 'rating' ), AniDB_dict, 'seasons', season, 'episodes', episode, 'rating'                 )
+          SaveDict(GetXml(ep_obj, 'rating'), AniDB_dict, 'seasons', season, 'episodes', episode, 'rating')
           SaveDict(GetXml(ep_obj, 'airdate'), AniDB_dict, 'seasons', season, 'episodes', episode, 'originally_available_at')
           ep_summary = SaveDict(summary_sanitizer(GetXml(ep_obj, 'summary')), AniDB_dict, 'seasons', season, 'episodes', episode, 'summary')
           Log.Info(' - [ ] summary: {}'.format((ep_summary[:200]).replace("\n", "\\n").replace("\r", "\\r")+'..' if len(ep_summary)> 200 else ep_summary))
-          for creator in creators:  SaveDict(",".join(creators[creator]), AniDB_dict, 'seasons', season, 'episodes', episode, creator)
+          for creator in creators:
+            SaveDict(",".join(creators[creator]), AniDB_dict, 'seasons', season, 'episodes', episode, creator)
 
         ### End of for ep_obj...
         Log.Info(("--- %s.summary info ---" % AniDBid).ljust(157, '-'))
@@ -364,7 +370,7 @@ def GetMetadata(media, movie, error_log, source, AniDBid, TVDBid, AniDBMovieSets
         ### AniDB numbering Missing Episodes ###
         if source.startswith("anidb") and not movie and max(map(int, media.seasons.keys()))<=1:
           if movie_ep_groups:
-            Log.Info("Movie/OVA Ep Groups: %s" % movie_ep_groups)  #movie_ep_groups: {'1': ['s1e1'], '3': ['s1e4', 's1e5', 's1e6'], '2': ['s1e3'], '-1': []}
+            Log.Info("Movie/OVA Ep Groups: %s" % movie_ep_groups)  # movie_ep_groups: {'1': ['s1e1'], '3': ['s1e4', 's1e5', 's1e6'], '2': ['s1e3'], '-1': []}
             SaveDict([value for key in movie_ep_groups for value in movie_ep_groups[key] if 0 < len(movie_ep_groups[key]) < int(key)], missing, '1')
           for season in sorted(missing):
             missing_eps = sorted(missing[season], key=common.natural_sort_key)
@@ -380,14 +386,10 @@ def GetMetadata(media, movie, error_log, source, AniDBid, TVDBid, AniDBMovieSets
       # External IDs
       ANNid = GetXml(xml, "/anime/resources/resource[@type='1']/externalentity/identifier")
       MALid = GetXml(xml, "/anime/resources/resource[@type='2']/externalentity/identifier")
-      #ANFOid = GetXml(xml, "/anime/resources/resource[@type='3']/externalentity/identifier"), GetXml(xml, "/anime/resources/resource[@type='3']/externalentity/identifier")
 
       # Logs
       if not Dict(AniDB_dict, 'summary'):  error_log['AniDB summaries missing'].append("AniDBid: %s" % (common.WEB_LINK % (common.ANIDB_SERIE_URL + AniDBid, AniDBid) + " | Title: '%s'" % Dict(AniDB_dict, 'title')))
       if not Dict(AniDB_dict, 'posters'):  error_log['AniDB posters missing'  ].append("AniDBid: %s" % (common.WEB_LINK % (common.ANIDB_SERIE_URL + AniDBid, AniDBid) + " | Title: '%s'" % Dict(AniDB_dict, 'title')))
-      #if not Dict(AniDB_dict, 'studio' ):                                                                                          error_log['anime-list studio logos'].append("AniDBid: %s | Title: '%s' | AniDB has studio '%s' and anime-list has '%s' | "    % (common.WEB_LINK % (ANIDB_SERIE_URL % AniDBid, AniDBid), title, metadata.studio, mapping_studio) + common.WEB_LINK % (ANIDB_TVDB_MAPPING_FEEDBACK % ("aid:" + metadata.id + " " + title, String.StripTags( XML.StringFromElement(xml, encoding='utf8'))), "Submit bug report (need GIT account)"))
-      #if metadata.studio       and 'studio' in AniDB_dict and AniDB_dict ['studio'] and AniDB_dict ['studio'] != metadata.studio:  error_log['anime-list studio logos'].append("AniDBid: %s | Title: '%s' | AniDB has studio '%s' and anime-list has '%s' | "    % (common.WEB_LINK % (ANIDB_SERIE_URL % AniDBid, AniDBid), title, metadata.studio, mapping_studio) + common.WEB_LINK % (ANIDB_TVDB_MAPPING_FEEDBACK % ("aid:" + metadata.id + " " + title, String.StripTags( XML.StringFromElement(xml, encoding='utf8'))), "Submit bug report (need GIT account)"))
-      #if metadata.studio == "" and 'studio' in AniDB_dict and AniDB_dict ['studio'] == "":                                         error_log['anime-list studio logos'].append("AniDBid: %s | Title: '%s' | AniDB and anime-list are both missing the studio" % (common.WEB_LINK % (ANIDB_SERIE_URL % AniDBid, AniDBid), title) )
 
       Log.Info("ANNid: '%s', MALid: '%s', xml loaded: '%s'" % (ANNid, MALid, str(xml is not None)))
 
@@ -396,17 +398,20 @@ def GetMetadata(media, movie, error_log, source, AniDBid, TVDBid, AniDBMovieSets
   Log.Info("AniDB_dict: {}".format(DictString(AniDB_dict, 4)))
   return AniDB_dict, ANNid, MALid
 
+
 def GetAniDBTitlesDB():
-  ''' Get the AniDB title database
-  '''
+  """ Get the AniDB title database
+  """
   global AniDBTitlesDB
-  ANIDB_TITLES  = 'http://anidb.net/api/anime-titles.xml.gz'               # AniDB title database file contain all ids, all languages  #http://bakabt.info/anidb/animetitles.xml
+  ANIDB_TITLES = 'http://anidb.net/api/anime-titles.xml.gz'               # AniDB title database file contain all ids, all languages  #http://bakabt.info/anidb/animetitles.xml
   AniDBTitlesDB = common.LoadFile(filename='anime-titles.xml', relativeDirectory="AniDB", url=ANIDB_TITLES, cache= CACHE_1DAY * 6)  # AniDB title database loaded once every 2 weeks
-  if not AniDBTitlesDB:  raise Exception("Failed to load core file '{url}'".format(url=os.path.splitext(os.path.basename(ANIDB_TITLES))[0]))
+  if not AniDBTitlesDB:
+    raise Exception("Failed to load core file '{url}'".format(url=os.path.splitext(os.path.basename(ANIDB_TITLES))[0]))
+
 
 def GetAniDBTitle(titles, lang=None, title_sort=False):
-  ''' Extract the series/movie/Episode title from AniDB
-  '''
+  """ Extract the series/movie/Episode title from AniDB
+  """
   languages = lang or [language.strip() for language in Prefs['SerieLanguagePriority'].split(',')] #[ Prefs['SerieLanguage1'], Prefs['SerieLanguage2'], Prefs['SerieLanguage3'] ]  #override default language
   if not 'main' in languages:  languages.append('main')                                      # Add main to the selection if not present in list (main nearly same as x-jat)
   type_priority = {'main':1, 'official':2, 'syn':3, 'synonym':4, 'short':5, None:6}          # lower = highter priority
@@ -418,12 +423,11 @@ def GetAniDBTitle(titles, lang=None, title_sort=False):
     if lang in languages and (type!='short' and type_priority[type] < langLevel[languages.index(lang)] or not type):  langTitles[languages.index(lang)  ], langLevel [languages.index(lang)  ] = title.text.replace("`", "'"), type_priority [ type ] if type else 6 + languages.index(lang)
     if type=='main':                                                                                                  langTitles[languages.index('main')], langLevel [languages.index('main')] = title.text.replace("`", "'"), type_priority [ type ]
     if lang==languages[0] and type in ['main', ""]:  break
-    #Log.Info("GetAniDBTitle - lang: {} type: {} title: {}".format(lang, type, title.text))
 
   for index, item in enumerate(langTitles+[]):
     if item:  break
-  #Log.Info("GetAniDBTitle - lang index: '{}', langTitles: '{}', langLevel: '{}'".format(languages.index(lang) if lang in languages else '', str(langTitles), str(langLevel)))
   return langTitles[index], langTitles[languages.index('main') if 'main' in languages else 1 if 1 in langTitles else 0], index
+
 
 def summary_sanitizer(summary):
   summary = summary.replace("`", "'")                                                                # Replace backquote with single quote
@@ -433,13 +437,429 @@ def summary_sanitizer(summary):
   summary = re.sub(r'\n\n+',                      r'\n\n', summary, flags=re.DOTALL)                 # Condense multiple empty lines
   return summary.strip(" \n")
 
+
 def WordsScore(words, title_cleansed):
-  ''' Score word compared to string in percents
-  '''
+  """ Score word compared to string in percents
+  """
   max_length = max(len("".join(words)), len(title_cleansed))
-  score=0
-  for word in words:  score+= 100*len(String.LongestCommonSubstring(word, title_cleansed))/max_length
+  score = 0
+  for word in words:
+    score += 100 * len(String.LongestCommonSubstring(word, title_cleansed)) / max_length
   return score
 
-### Notes ###
-# [].count(True) replaces any() (not declared in Python 2.4, gives "NameError: global name 'any' is not defined")
+
+ignored_tags = [
+  "3d cg animation",
+  "4-koma manga",
+  "18 restricted",
+  "action game",
+  "adapted into japanese movie",
+  "adapted into jdrama",
+  "africa",
+  "age difference romance",
+  "ahegao",
+  "akihabara",
+  "alice's adventures in wonderland",
+  "alternative past",
+  "american derived",
+  "americas",
+  "amusement park visit",
+  "anal",
+  "angel",
+  "animal abuse",
+  "animal protagonist",
+  "animal sidekick",
+  "animeism",
+  "asia",
+  "association football",
+  "australia",
+  "autumn",
+  "bad cooking",
+  "bakumatsu - meiji period",
+  "bath house visit",
+  "bdsm",
+  "beach visit",
+  "bestiality",
+  "birthday",
+  "bishoujo",
+  "black and white",
+  "blimp",
+  "bondage",
+  "boobs in your face",
+  "borderline porn",
+  "bounty hunter",
+  "breast expansion",
+  "breast fondling",
+  "broadcast cropped to 4-3",
+  "brother-sister incest",
+  "buddhism",
+  "bukkake",
+  "bullet time",
+  "calling your attacks",
+  "cast missing",
+  "cast-free",
+  "catchphrase",
+  "catgirl",
+  "censored uncensored version",
+  "cervix penetration",
+  "cgi",
+  "character driven",
+  "chibi ed",
+  "chikan",
+  "child soldier",
+  "china",
+  "chinese production",
+  "christmas",
+  "claymation",
+  "clumsy",
+  "collateral damage",
+  "combat",
+  "commercial",
+  "concert",
+  "confession",
+  "contractor",
+  "cosplaying",
+  "countryside",
+  "creampie",
+  "cum play",
+  "cunnilingus",
+  "dancing",
+  "dark elf",
+  "dark-skinned girl",
+  "deflowering",
+  "deity",
+  "description missing",
+  "desert",
+  "detailed landscapes",
+  "dialogue driven",
+  "dildos - vibrators",
+  "doggy style",
+  "doll",
+  "domestic cat",
+  "dominatrix",
+  "double fellatio",
+  "double penetration",
+  "double-sided dildo",
+  "dragon",
+  "dreams and reality",
+  "dynamic",
+  "earth",
+  "eating pocky",
+  "eccentric",
+  "ed variety",
+  "educational",
+  "elements",
+  "elf",
+  "enema",
+  "energetic",
+  "engrish",
+  "enjoyable rape",
+  "ensemble cast",
+  "episodic",
+  "erotic game",
+  "erotic torture",
+  "europe",
+  "european stylised",
+  "excessive censoring",
+  "exhibitionism",
+  "experimental animation",
+  "extrasensory perception",
+  "faceless background characters",
+  "facesitting",
+  "facial distortion",
+  "fairy",
+  "family without father",
+  "family without mother",
+  "fast-paced",
+  "faster-than-light travel",
+  "father-daughter incest",
+  "fellatio",
+  "female rapes female",
+  "female student",
+  "female teacher",
+  "ffm threesome",
+  "fictional location",
+  "fire",
+  "first kiss",
+  "fisting",
+  "flash animation",
+  "flashback",
+  "flat chest jokes",
+  "foot fetish",
+  "footjob",
+  "foursome",
+  "france",
+  "french kiss",
+  "funny expressions",
+  "furo scene",
+  "futa x female",
+  "futanari",
+  "future",
+  "gainax bounce",
+  "game",
+  "gang bang",
+  "gang rape",
+  "gender bender",
+  "germany",
+  "ghost",
+  "gigantic breasts",
+  "girly tears",
+  "glutton",
+  "gokkun",
+  "golden shower",
+  "groping",
+  "gun - to be split and deleted",
+  "half-length episodes",
+  "handjob",
+  "hidden vibrator",
+  "hokkaido",
+  "horny nosebleed",
+  "hostage situation",
+  "hot springs visit",
+  "housewives",
+  "immature",
+  "impregnation",
+  "incest",
+  "indecisive",
+  "intercrural sex",
+  "internal shots",
+  "island",
+  "italy",
+  "itano circus",
+  "japan",
+  "journey to the west",
+  "journey",
+  "karaoke",
+  "kitsune",
+  "korea",
+  "kyoto",
+  "lactation",
+  "large breasts",
+  "late for school",
+  "lingerie",
+  "live-action closing",
+  "live-action imagery",
+  "loli",
+  "london",
+  "long episodes",
+  "magic circles",
+  "maid",
+  "main character dies",
+  "maintenance tags",
+  "male protagonist",
+  "male rape victim",
+  "mammary intercourse",
+  "manga",
+  "manhua",
+  "manly tears",
+  "manly",
+  "mars",
+  "masturbation",
+  "megalomaniac",
+  "middle east",
+  "minna no uta",
+  "mmf threesome",
+  "moe",
+  "mother-daughter incest",
+  "mother-son incest",
+  "movie",
+  "multi-segment episodes",
+  "multiple couples",
+  "multiple protagonists - to be moved to parent or deleted",
+  "musical band",
+  "naked apron",
+  "narration",
+  "netorare",
+  "netori",
+  "new year's day",
+  "new york",
+  "new",
+  "ninja",
+  "no dialogue",
+  "noitamina",
+  "non-blood-related siblings -- do not use -- to be deleted",
+  "non-linear",
+  "nopan",
+  "novel",
+  "nun",
+  "nurse",
+  "occupation and career",
+  "ocean",
+  "office lady",
+  "ojou-sama laugh",
+  "okinawa",
+  "older female younger male",
+  "oofuji noburou award",
+  "op and ed sung by characters",
+  "op variety",
+  "orgy",
+  "original work",
+  "osaka",
+  "outdoor sex",
+  "oyakodon",
+  "panels that require pausing",
+  "pantyjob",
+  "paper clothes",
+  "paris",
+  "particularly suitable for children",
+  "past",
+  "penis jokes",
+  "perverted",
+  "photographic backgrounds",
+  "physical examination",
+  "pic needs improvement",
+  "piggyback ride",
+  "pirate",
+  "place",
+  "plot continuity",
+  "plot with porn",
+  "point of view",
+  "pool episode",
+  "pornography",
+  "post-credits scene",
+  "predominantly adult cast",
+  "predominantly female cast",
+  "predominantly male cast",
+  "pregnant sex",
+  "present",
+  "product placement",
+  "propaganda",
+  "prostate massage",
+  "prostitution",
+  "protection complex",
+  "pseudo tentacle rape scene",
+  "psychological sexual abuse",
+  "public sex",
+  "puppetmation",
+  "pussy sandwich",
+  "real-world location",
+  "recycled animation -- to be split and deleted",
+  "remake",
+  "remastered version available",
+  "reverse trap",
+  "rimming",
+  "robot helper",
+  "rpg",
+  "russia",
+  "safer sex",
+  "scat",
+  "school festival - to be split and deleted",
+  "school swimsuit",
+  "scissoring",
+  "sekai meisaku gekijou",
+  "sengoku period",
+  "sentai",
+  "setting",
+  "sex tape",
+  "sex toys",
+  "sex while on the phone",
+  "sexual abuse -- to be split and deleted",
+  "sexual fantasies",
+  "sexual humour",
+  "sexually dominant",
+  "shibari",
+  "short episodes",
+  "short movie",
+  "short story collection",
+  "shota",
+  "show within a show",
+  "shower scene",
+  "sister-sister incest",
+  "sixty-nine",
+  "skimpy clothing",
+  "skirt flipping",
+  "slide show animation",
+  "slow-paced",
+  "small breasts",
+  "smoker",
+  "south korean production",
+  "spanking",
+  "spellcasting",
+  "spring",
+  "squirting",
+  "staff missing",
+  "stand-alone movie",
+  "stereoscopic imaging",
+  "stereotypes",
+  "stomach bulge",
+  "stomach stretch",
+  "stop motion",
+  "strapon",
+  "strappado bondage",
+  "strong male lead",
+  "student council member",
+  "submission",
+  "subtle op ed sequence change",
+  "sudden naked girl appearance",
+  "sudden naked guy appearance",
+  "summer festival",
+  "summer",
+  "summoning",
+  "super robot wars",
+  "super robot",
+  "swimsuit",
+  "sword",
+  "talking animal",
+  "target audience",
+  "tate anime",
+  "tbs wonderful",
+  "teacher x student",
+  "technical aspects",
+  "tentacle",
+  "themes",
+  "thick line animation",
+  "threesome with sisters",
+  "threesome",
+  "throat fucking",
+  "time skip",
+  "time",
+  "to be moved to character",
+  "to be moved to episode",
+  "tokugawa period",
+  "tokyo destroyed",
+  "tokyo skytree",
+  "tokyo tower",
+  "tokyo",
+  "tomboy",
+  "tone changes",
+  "torture",
+  "transfer student",
+  "translation convention",
+  "trauma",
+  "triple penetration",
+  "tsukkomi",
+  "tsundere",
+  "tv censoring",
+  "twin -- to be deleted",
+  "twincest",
+  "uncensored version available",
+  "undead",
+  "uniform -- to be split and deleted",
+  "uniform fetish",
+  "united kingdom",
+  "united states",
+  "universal century",
+  "unusual weapons -- to be split and deleted",
+  "urination",
+  "urophagia",
+  "valentine's day",
+  "vampire",
+  "vanilla series",
+  "vertical format",
+  "violent",
+  "visible aura",
+  "visual novel",
+  "voyeurism",
+  "vulgar",
+  "waitress",
+  "walls of text",
+  "wardrobe malfunction",
+  "water sex",
+  "watercolour style",
+  "weekly shounen jump",
+  "western comics",
+  "whipping",
+  "window fuck",
+  "winter",
+  "zettai ryouiki"
+]
